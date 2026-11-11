@@ -94,7 +94,7 @@
 // Size of buffer to hold descriptors and other data used for enumeration
 #define CFG_TUH_ENUMERATION_BUFSIZE 512
 
-#define CFG_TUH_HUB                 1 // number of supported hubs
+#define CFG_TUH_HUB                 2 // number of supported hubs (dock hub + GunCon 3 internal hub)
 #define CFG_TUH_CDC                 1 // CDC ACM
 #define CFG_TUH_CDC_FTDI            0 // FTDI Serial.  FTDI is not part of CDC class, only to re-use CDC driver API
 #define CFG_TUH_CDC_CP210X          0 // CP210x Serial. CP210X is not part of CDC class, only to re-use CDC driver API

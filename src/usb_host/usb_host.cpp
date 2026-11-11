@@ -17,6 +17,7 @@
 #include "rust_api.h"
 #include "task.h"
 #include "tusb.h"
+#include "usb_host/guncon3.h"
 #include "xinput_host.h"
 
 namespace {
@@ -318,8 +319,12 @@ void tuh_cdc_rx_cb(uint8_t idx)
 
 usbh_class_driver_t const* usbh_app_driver_get_cb(uint8_t* driver_count)
 {
-    *driver_count = 1;
-    return &usbh_xinput_driver;
+    static const usbh_class_driver_t drivers[] = {
+        usbh_guncon3_driver,
+        usbh_xinput_driver,
+    };
+    *driver_count = sizeof(drivers) / sizeof(drivers[0]);
+    return drivers;
 }
 
 static void control_xfer_complete_cb(tuh_xfer_t* xfer)

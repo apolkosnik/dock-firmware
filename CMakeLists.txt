@@ -73,6 +73,8 @@ add_executable(dock-firmware
     ${SRC}/usb_host/hid.cpp
     ${SRC}/usb_host/usb_host.cpp
     ${SRC}/usb_host/xinput.cpp
+    ${SRC}/usb_host/guncon3.cpp
+    ${SRC}/usb_host/guncon3_protocol.cpp
     ${SRC}/usb_host/hid_drivers/generic.cpp
     ${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/dcd_pio_usb.c
     ${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c
