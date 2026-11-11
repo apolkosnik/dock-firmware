@@ -84,17 +84,9 @@ impl Handheld {
     }
 
     pub fn handle_gamepad_data(&mut self, id: GamepadId, data: &GamepadData) {
-        let mut buf = [0u8; 20];
-        buf[0..4].copy_from_slice(&id.0.to_le_bytes());
-        buf[4..20].copy_from_slice(unsafe {
-            core::slice::from_raw_parts(
-                data as *const _ as *const u8,
-                core::mem::size_of::<GamepadData>(),
-            )
-        });
-
-        let packet = Packet::new(REQ_GAMEPAD_DATA, &buf);
-        TX_PACKET_QUEUE.get().push_back(packet);
+        TX_PACKET_QUEUE
+            .get()
+            .push_back(Packet::gamepad_data(id, data));
     }
 
     pub fn handle_xfer_complete(&mut self, result: usb_host::HandheldXferResult) {
@@ -170,6 +162,28 @@ impl Packet {
         }
     }
 
+    /// REQ_GAMEPAD_DATA: 4 byte slot, then the 16 GamepadData bytes.
+    pub fn gamepad_data(id: GamepadId, data: &GamepadData) -> Packet {
+        let mut buf = [0u8; 4 + GamepadData::SIZE];
+        buf[0..4].copy_from_slice(&id.0.to_le_bytes());
+        buf[4..].copy_from_slice(&data.to_le_bytes());
+        Packet::new(REQ_GAMEPAD_DATA, &buf)
+    }
+
+    /// The slot and data of a REQ_GAMEPAD_DATA packet.
+    fn get_gamepad_data(&self) -> Option<(GamepadId, GamepadData)> {
+        if self.id != REQ_GAMEPAD_DATA || (self.payload_len as usize) < 4 + GamepadData::SIZE {
+            return None;
+        }
+        let id = u32::from_le_bytes(self.payload[0..4].try_into().unwrap());
+        let data = GamepadData::from_le_bytes(&self.payload[4..4 + GamepadData::SIZE])?;
+        Some((GamepadId(id), data))
+    }
+
+    fn set_gamepad_data(&mut self, data: &GamepadData) {
+        self.payload[4..4 + GamepadData::SIZE].copy_from_slice(&data.to_le_bytes());
+    }
+
     pub fn payload(&self) -> &[u8] {
         &self.payload[..self.payload_len as usize]
     }
@@ -204,19 +218,7 @@ impl PacketQueue {
 
     pub fn push_back(&self, packet: Packet) {
         let mut queue = self.packets.lock(Duration::infinite()).unwrap();
-
-        // If the last packet pushed is a REQ_GAMEPAD_DATA packet, just replace it.
-        if packet.id == REQ_GAMEPAD_DATA {
-            if let Some(back) = queue.back_mut()
-                && back.id == REQ_GAMEPAD_DATA
-            {
-                *back = packet;
-                log::warn!("Dropping gamepad data");
-                return;
-            }
-        }
-
-        queue.push_back(packet);
+        push_back_locked(&mut queue, packet);
     }
 
     pub fn reset(&self) {
@@ -225,6 +227,175 @@ impl PacketQueue {
     }
 }
 
+/// Queue a packet for the handheld.
+///
+/// Gamepad data packets carry the full state, so if the newest queued packet is
+/// one, it is simply replaced (as before). Mouse data packets (buttons::MOUSE)
+/// carry movement deltas, which must not be lost while the link is busy: a new
+/// mouse packet is added into the queued packet of the same mouse when the
+/// buttons are unchanged, and queued behind it when they differ, so that every
+/// button transition reaches the handheld. A queued mouse packet is never
+/// replaced by a gamepad packet. The queue stays bounded: at most one
+/// movement-only packet per mouse plus one per (human-rate) button change, and
+/// one trailing gamepad packet.
+fn push_back_locked(queue: &mut VecDeque<Packet>, packet: Packet) {
+    if let Some((id, data)) = packet.get_gamepad_data() {
+        if data.is_mouse() {
+            // Newest queued packet of this mouse, if any.
+            for queued in queue.iter_mut().rev() {
+                let Some((queued_id, queued_data)) = queued.get_gamepad_data() else {
+                    continue;
+                };
+                if queued_id != id || !queued_data.is_mouse() {
+                    continue;
+                }
+                if queued_data.buttons() == data.buttons() {
+                    queued.set_gamepad_data(&queued_data.merge_mouse(&data));
+                    return;
+                }
+                break;
+            }
+            queue.push_back(packet);
+            return;
+        }
+
+        // If the last packet pushed is a (non-mouse) REQ_GAMEPAD_DATA packet, just replace it.
+        if let Some(back) = queue.back_mut()
+            && let Some((_, back_data)) = back.get_gamepad_data()
+            && !back_data.is_mouse()
+        {
+            *back = packet;
+            log::warn!("Dropping gamepad data");
+            return;
+        }
+    }
+
+    queue.push_back(packet);
+}
+
 pub fn init() {
     TX_PACKET_QUEUE.set(PacketQueue::new());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gamepad::buttons;
+
+    fn mouse(id: u32, buttons: u32, dx: i16, dy: i16, wheel: i16) -> Packet {
+        Packet::gamepad_data(
+            GamepadId(id),
+            &GamepadData::new(buttons::MOUSE | buttons, dx, dy, wheel as u16, 0, 0, 0),
+        )
+    }
+
+    fn gamepad(id: u32, buttons: u32) -> Packet {
+        Packet::gamepad_data(GamepadId(id), &GamepadData::new(buttons, 0, 0, 0, 0, 0, 0))
+    }
+
+    fn contents(queue: &VecDeque<Packet>) -> alloc::vec::Vec<(u8, Option<(u32, u32, i16, i16, i16)>)> {
+        queue
+            .iter()
+            .map(|p| {
+                let data = p.get_gamepad_data().map(|(id, d)| {
+                    (id.0, d.buttons(), d.to_le_bytes()[4..6].try_into().map(i16::from_le_bytes).unwrap(),
+                     d.to_le_bytes()[6..8].try_into().map(i16::from_le_bytes).unwrap(),
+                     d.to_le_bytes()[8..10].try_into().map(i16::from_le_bytes).unwrap())
+                });
+                (p.id, data)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mouse_movement_merges_into_queued_packet() {
+        let mut q = VecDeque::new();
+        push_back_locked(&mut q, mouse(7, buttons::MOUSE_LEFT, 3, -2, 1));
+        push_back_locked(&mut q, mouse(7, buttons::MOUSE_LEFT, 4, -5, -3));
+        push_back_locked(&mut q, mouse(7, buttons::MOUSE_LEFT, -1, 0, 0));
+        assert_eq!(
+            contents(&q),
+            [(REQ_GAMEPAD_DATA, Some((7, buttons::MOUSE | buttons::MOUSE_LEFT, 6, -7, -2)))]
+        );
+    }
+
+    #[test]
+    fn mouse_button_change_is_queued_separately() {
+        let mut q = VecDeque::new();
+        push_back_locked(&mut q, mouse(7, 0, 3, 0, 0));
+        push_back_locked(&mut q, mouse(7, buttons::MOUSE_LEFT, 1, 0, 0));
+        push_back_locked(&mut q, mouse(7, buttons::MOUSE_LEFT, 1, 0, 0));
+        push_back_locked(&mut q, mouse(7, 0, 2, 0, 0));
+        assert_eq!(
+            contents(&q),
+            [
+                (REQ_GAMEPAD_DATA, Some((7, buttons::MOUSE, 3, 0, 0))),
+                (REQ_GAMEPAD_DATA, Some((7, buttons::MOUSE | buttons::MOUSE_LEFT, 2, 0, 0))),
+                (REQ_GAMEPAD_DATA, Some((7, buttons::MOUSE, 2, 0, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn two_mice_accumulate_independently() {
+        let mut q = VecDeque::new();
+        push_back_locked(&mut q, mouse(1, 0, 10, 0, 0));
+        push_back_locked(&mut q, mouse(2, 0, -10, 1, 0));
+        push_back_locked(&mut q, mouse(1, 0, 5, 0, 0));
+        push_back_locked(&mut q, mouse(2, 0, -5, 1, 0));
+        assert_eq!(
+            contents(&q),
+            [
+                (REQ_GAMEPAD_DATA, Some((1, buttons::MOUSE, 15, 0, 0))),
+                (REQ_GAMEPAD_DATA, Some((2, buttons::MOUSE, -15, 2, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn gamepad_packets_do_not_disturb_mouse_packets() {
+        let mut q = VecDeque::new();
+        push_back_locked(&mut q, mouse(1, 0, 10, 0, 0));
+        // A gamepad packet behind a mouse packet is queued, not merged into it.
+        push_back_locked(&mut q, gamepad(3, buttons::A));
+        // A second gamepad packet replaces the first (existing behaviour).
+        push_back_locked(&mut q, gamepad(3, buttons::B));
+        // More mouse movement still merges into the mouse packet.
+        push_back_locked(&mut q, mouse(1, 0, 1, 1, 0));
+        // A mouse packet never replaces a gamepad packet.
+        push_back_locked(&mut q, mouse(2, 0, 1, 0, 0));
+        assert_eq!(
+            contents(&q),
+            [
+                (REQ_GAMEPAD_DATA, Some((1, buttons::MOUSE, 11, 1, 0))),
+                (REQ_GAMEPAD_DATA, Some((3, buttons::B, 0, 0, 0))),
+                (REQ_GAMEPAD_DATA, Some((2, buttons::MOUSE, 1, 0, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_saturates() {
+        let mut q = VecDeque::new();
+        push_back_locked(&mut q, mouse(1, 0, 30000, -30000, 30000));
+        push_back_locked(&mut q, mouse(1, 0, 30000, -30000, 30000));
+        assert_eq!(
+            contents(&q),
+            [(REQ_GAMEPAD_DATA, Some((1, buttons::MOUSE, i16::MAX, i16::MIN, i16::MAX)))]
+        );
+    }
+
+    #[test]
+    fn other_packets_are_appended() {
+        let mut q = VecDeque::new();
+        push_back_locked(&mut q, Packet::new(REQ_GAMEPAD_CONNECT, &[1, 0, 0, 0]));
+        push_back_locked(&mut q, gamepad(1, buttons::A));
+        push_back_locked(&mut q, Packet::new(REQ_GAMEPAD_DISCONNECT, &[1, 0, 0, 0]));
+        push_back_locked(&mut q, gamepad(2, buttons::A));
+        assert_eq!(q.len(), 4);
+        let mut buf = [0u8; 64];
+        assert_eq!(q[1].encode_to(&mut buf), 24);
+        assert_eq!(buf[0], REQ_GAMEPAD_DATA);
+        assert_eq!(&buf[4..8], &[1, 0, 0, 0]);
+    }
 }

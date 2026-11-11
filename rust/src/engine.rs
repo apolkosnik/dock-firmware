@@ -123,10 +123,13 @@ fn task(_task: Task) {
     }
 }
 
-pub fn send(message: Message) {
+/// Post a message to the engine task. Returns false if the queue is full.
+pub fn send(message: Message) -> bool {
     if let Err(_) = QUEUE.get().send(message, Duration::zero()) {
         log::warn!("Failed to post message");
+        return false;
     }
+    true
 }
 
 pub fn start_task() {

@@ -1,7 +1,11 @@
 #include "bluetooth/bluetooth.h"
 
+#include <new>
+
 #include "FreeRTOS.h"
+#include "mouse/mouse.h"
 #include "pico/cyw43_arch.h"
+#include "pico/time.h"
 #include "priorities.h"
 #include "rust_api.h"
 #include "task.h"
@@ -13,11 +17,26 @@ constexpr size_t kStackSize = 16 * 1024;
 
 struct GamepadInfo {
     uint32_t id;
+    /// bluepad32 delivers UNI_CONTROLLER_CLASS_MOUSE events for this device.
+    bool is_mouse;
+    /// Mouse packets (see include/mouse/mouse.h); keeps movement that could
+    /// not be posted to the engine.
+    mouse::Accumulator mouse_accumulator;
 };
-_Static_assert(sizeof(GamepadInfo) <= HID_DEVICE_MAX_PLATFORM_DATA, "GamepadInfo too big");
+static_assert(sizeof(GamepadInfo) <= HID_DEVICE_MAX_PLATFORM_DATA, "GamepadInfo too big");
+static_assert(alignof(GamepadInfo) <= 4, "GamepadInfo must not need more than 4-byte alignment");
 
 GamepadInfo* GetGamepadInfo(uni_hid_device_t* d) {
     return (GamepadInfo*)d->platform_data;
+}
+
+/// Post a mouse packet; movement is kept for the next packet if the engine
+/// queue is full.
+static void SendMousePacket(GamepadInfo* info) {
+    GamepadData data = info->mouse_accumulator.Take(time_us_32());
+    if (!rust_event_gamepad_data(info->id, data)) {
+        info->mouse_accumulator.Restore(data);
+    }
 }
 
 static void platform_init(int argc, const char** argv) {
@@ -57,8 +76,12 @@ static uni_error_t platform_on_device_discovered(bd_addr_t addr, const char* nam
     (void)device_class;
     (void)rssi;
 
-    // Only accept gamepads.
-    if (((device_class & UNI_BT_COD_MINOR_MASK) & UNI_BT_COD_MINOR_GAMEPAD) != UNI_BT_COD_MINOR_GAMEPAD) {
+    // Only accept gamepads and mice (BLE mice are reported with the mouse
+    // class of device by bluepad32).
+    uint16_t minor = device_class & UNI_BT_COD_MINOR_MASK;
+    bool is_gamepad = (minor & UNI_BT_COD_MINOR_GAMEPAD) == UNI_BT_COD_MINOR_GAMEPAD;
+    bool is_mouse = (minor & UNI_BT_COD_MINOR_MICE) == UNI_BT_COD_MINOR_MICE;
+    if (!is_gamepad && !is_mouse) {
         logi("Ignoring non-gamepad\n");
         return UNI_ERROR_IGNORE_DEVICE;
     }
@@ -81,7 +104,9 @@ static uni_error_t platform_on_device_ready(uni_hid_device_t* d) {
     logi("my_platform: device ready: %p\n", d);
 
     uint32_t gamepad_id = rust_gamepad_allocate_id();
-    GetGamepadInfo(d)->id = gamepad_id;
+    GamepadInfo* info = new (d->platform_data) GamepadInfo { };
+    info->id = gamepad_id;
+    info->is_mouse = uni_hid_device_is_mouse(d);
 
     uint8_t device_id[8];
     memset(device_id, 0, sizeof(device_id));
@@ -89,10 +114,15 @@ static uni_error_t platform_on_device_ready(uni_hid_device_t* d) {
 
     rust_event_gamepad_connected(
         gamepad_id,
-        (uint32_t)d->controller_type,
+        info->is_mouse ? mouse::kGamepadKindMouse : (uint32_t)d->controller_type,
         device_id,
         false
     );
+
+    if (info->is_mouse) {
+        // First packet: tells the handheld that this slot is a mouse.
+        SendMousePacket(info);
+    }
 
     if (d->report_parser.set_player_leds != NULL) {
         d->report_parser.set_player_leds(d, 1);
@@ -129,6 +159,27 @@ static void platform_on_controller_data(uni_hid_device_t* d, uni_controller_t* c
             num_events = 0;
             events_since = xTaskGetTickCount();
         }
+    } else if (ctl->klass == UNI_CONTROLLER_CLASS_MOUSE) {
+        GamepadInfo* info = GetGamepadInfo(d);
+        if (!info->is_mouse) {
+            // Mouse events from a device announced as a gamepad: not mapped.
+            return;
+        }
+        const uni_mouse_t* m = &ctl->mouse;
+        mouse::Report report;
+        report.buttons = 0;
+        report.buttons |= (m->buttons & UNI_MOUSE_BUTTON_LEFT) ? mouse::kButtonLeft : 0;
+        report.buttons |= (m->buttons & UNI_MOUSE_BUTTON_RIGHT) ? mouse::kButtonRight : 0;
+        report.buttons |= (m->buttons & UNI_MOUSE_BUTTON_MIDDLE) ? mouse::kButtonMiddle : 0;
+        report.buttons |= (m->buttons & UNI_MOUSE_BUTTON_AUX_0) ? mouse::kButtonBack : 0;
+        report.buttons |= (m->buttons & UNI_MOUSE_BUTTON_AUX_1) ? mouse::kButtonForward : 0;
+        report.dx = m->delta_x;
+        report.dy = m->delta_y;
+        report.wheel = m->scroll_wheel;
+        // Bluetooth mice report at the connection interval (at most ~133 Hz
+        // with the 7.5 ms interval set above), so every report is posted.
+        info->mouse_accumulator.Add(report);
+        SendMousePacket(info);
     }
 }
 

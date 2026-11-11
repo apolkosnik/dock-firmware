@@ -33,11 +33,23 @@ class UsbHidDriver {
     virtual void Initialize(std::span<const uint8_t> descriptor) = 0;
     virtual void OnReportReceived(std::span<const uint8_t> report) = 0;
 
+    /// Called from the USB host task loop (about every millisecond).
+    virtual void Poll(uint32_t now_us) { static_cast<void>(now_us); }
+
     virtual uni_controller_type_t GetGamepadType() = 0;
+
+    /// Value passed as `kind` to rust_event_gamepad_connected. Defaults to the
+    /// bluepad32 controller type; non-gamepad drivers use rust/src/gamepad.rs kind::*.
+    virtual uint32_t GetGamepadKind() { return static_cast<uint32_t>(GetGamepadType()); }
 
    protected:
     void RequestReport();
-    void ReportData(GamepadData data);
+
+    /// Post data to the engine. Returns false if the engine queue is full.
+    bool ReportData(GamepadData data);
 
     UsbHidGamepad& gamepad_;
 };
+
+/// Run the drivers' Poll(); call from the USB host task loop.
+void UsbHidPoll();

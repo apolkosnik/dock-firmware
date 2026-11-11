@@ -10,7 +10,9 @@
 #include "controller/uni_controller_type.h"
 
 namespace {
-constexpr size_t kMaxGamepads = CFG_TUH_XINPUT;
+/// CFG_TUH_XINPUT is the number of XInput interfaces per device; one slot per
+/// possible interface so that several controllers can be connected at once.
+constexpr size_t kMaxGamepads = CFG_TUH_DEVICE_MAX * CFG_TUH_XINPUT;
 
 /// Threshold for reporting trigger buttons as digital L2/R2 press.
 constexpr uint8_t kTriggerThreshold = 8;

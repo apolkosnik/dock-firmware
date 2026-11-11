@@ -68,6 +68,7 @@ add_executable(dock-firmware
     ${SRC}/bluetooth/bluetooth.cpp
     ${SRC}/gpio/gpio.cpp
     ${SRC}/led/led.cpp
+    ${SRC}/mouse/mouse.cpp
     ${SRC}/usb_device/usb_device.cpp
     ${SRC}/usb_device/descriptors.c
     ${SRC}/usb_host/hid.cpp
@@ -76,6 +77,7 @@ add_executable(dock-firmware
     ${SRC}/usb_host/guncon3.cpp
     ${SRC}/usb_host/guncon3_protocol.cpp
     ${SRC}/usb_host/hid_drivers/generic.cpp
+    ${SRC}/usb_host/hid_drivers/mouse.cpp
     ${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/dcd_pio_usb.c
     ${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c
 )

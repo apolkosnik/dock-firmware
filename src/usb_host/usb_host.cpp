@@ -18,6 +18,7 @@
 #include "task.h"
 #include "tusb.h"
 #include "usb_host/guncon3.h"
+#include "usb_host/hid.h"
 #include "xinput_host.h"
 
 namespace {
@@ -66,6 +67,7 @@ void usb_host_task(void*)
 
     while (1) {
         tuh_task_ext(1, false);
+        UsbHidPoll();
         pump_handheld_packet_queue();
     }
 }

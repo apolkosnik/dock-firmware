@@ -99,7 +99,10 @@
 #define CFG_TUH_CDC_FTDI            0 // FTDI Serial.  FTDI is not part of CDC class, only to re-use CDC driver API
 #define CFG_TUH_CDC_CP210X          0 // CP210x Serial. CP210X is not part of CDC class, only to re-use CDC driver API
 #define CFG_TUH_CDC_CH34X           0 // CH340 or CH341 Serial. CH34X is not part of CDC class, only to re-use CDC driver API
-#define CFG_TUH_HID                 1
+// HID interfaces (not devices): a mouse often exposes 2-3, so two mice and two
+// HID gamepads need 8. Each costs about 142 bytes of RAM (14-byte state plus the
+// 64-byte IN and OUT endpoint buffers).
+#define CFG_TUH_HID                 8
 #define CFG_TUH_MSC                 0
 #define CFG_TUH_VENDOR              0
 #define CFG_TUH_XINPUT              1

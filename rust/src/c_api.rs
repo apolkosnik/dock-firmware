@@ -27,9 +27,10 @@ pub extern "C" fn rust_event_gamepad_connected(
     engine::send(engine::Message::GamepadConnected(gp));
 }
 
+/// Returns false if the engine queue is full and the data was dropped.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_event_gamepad_data(id: u32, data: GamepadData) {
-    engine::send(engine::Message::GamepadData(GamepadId(id), data));
+pub extern "C" fn rust_event_gamepad_data(id: u32, data: GamepadData) -> bool {
+    engine::send(engine::Message::GamepadData(GamepadId(id), data))
 }
 
 #[unsafe(no_mangle)]

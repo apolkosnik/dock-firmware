@@ -1,5 +1,5 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 
 extern crate alloc;
 
@@ -16,8 +16,11 @@ mod sys;
 mod usb_host;
 mod util;
 
+#[cfg(not(test))]
 use freertos_rust::FreeRtosAllocator;
 
+// Host unit tests (cargo test) use the host allocator.
+#[cfg(not(test))]
 #[global_allocator]
 static GLOBAL: FreeRtosAllocator = FreeRtosAllocator;
 
