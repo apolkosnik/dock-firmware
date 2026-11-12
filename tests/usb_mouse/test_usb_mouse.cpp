@@ -207,6 +207,35 @@ const uint8_t kKeyboardDesc[] = {
     0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xC0,
 };
 
+// A pointing device with absolute axes (Pointer application collection, X/Y
+// 0..32767, Input Absolute): its positions are not movements, so it is not a
+// mouse (and not a gamepad either).
+const uint8_t kAbsolutePointerDesc[] = {
+    0x05, 0x01,        // Usage Page (Generic Desktop)
+    0x09, 0x01,        // Usage (Pointer)
+    0xA1, 0x01,        // Collection (Application)
+    0x05, 0x09,        //   Usage Page (Button)
+    0x19, 0x01,        //   Usage Minimum (1)
+    0x29, 0x03,        //   Usage Maximum (3)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x25, 0x01,        //   Logical Maximum (1)
+    0x75, 0x01,        //   Report Size (1)
+    0x95, 0x03,        //   Report Count (3)
+    0x81, 0x02,        //   Input (Data, Variable, Absolute)
+    0x75, 0x05,        //   Report Size (5)
+    0x95, 0x01,        //   Report Count (1)
+    0x81, 0x01,        //   Input (Constant)
+    0x05, 0x01,        //   Usage Page (Generic Desktop)
+    0x09, 0x30,        //   Usage (X)
+    0x09, 0x31,        //   Usage (Y)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x26, 0xFF, 0x7F,  //   Logical Maximum (32767)
+    0x75, 0x10,        //   Report Size (16)
+    0x95, 0x02,        //   Report Count (2)
+    0x81, 0x02,        //   Input (Data, Variable, Absolute)
+    0xC0,              // End Collection
+};
+
 // A gamepad with X/Y axes and 8 buttons in a Gamepad application collection.
 const uint8_t kGamepadDesc[] = {
     0x05, 0x01, 0x09, 0x05, 0xA1, 0x01, 0xA1, 0x00, 0x09, 0x30, 0x09, 0x31, 0x15, 0x00, 0x26, 0xFF,
@@ -393,6 +422,24 @@ void TestNonMouseDescriptors()
     CHECK(!mouse::ParseReportDescriptor(kGamepadDesc, sizeof(kGamepadDesc), &l), "gamepad parsed as mouse");
     n = mouse::ApplicationUsages(kGamepadDesc, sizeof(kGamepadDesc), usages, 8);
     CHECK(n == 1 && usages[0] == 0x00010005u, "gamepad usages n=%zu", n);
+
+    // Absolute axes are positions, not movements: not a mouse, whether the
+    // collection's usage is Pointer or Mouse (a KVM's "absolute mouse").
+    CHECK(!mouse::ParseReportDescriptor(kAbsolutePointerDesc, sizeof(kAbsolutePointerDesc), &l),
+          "absolute pointer parsed as mouse");
+    n = mouse::ApplicationUsages(kAbsolutePointerDesc, sizeof(kAbsolutePointerDesc), usages, 8);
+    CHECK(n == 1 && usages[0] == 0x00010001u, "absolute pointer usages n=%zu", n);
+    {
+        uint8_t absolute_mouse[sizeof(kAbsolutePointerDesc)];
+        memcpy(absolute_mouse, kAbsolutePointerDesc, sizeof(absolute_mouse));
+        absolute_mouse[3] = 0x02;  // Usage (Mouse)
+        CHECK(!mouse::ParseReportDescriptor(absolute_mouse, sizeof(absolute_mouse), &l), "absolute mouse parsed as mouse");
+        // The same axes relative: a 16-bit mouse.
+        absolute_mouse[sizeof(absolute_mouse) - 2] = 0x06;  // Input (Data, Variable, Relative)
+        CHECK(mouse::ParseReportDescriptor(absolute_mouse, sizeof(absolute_mouse), &l), "relative mouse not parsed");
+        CheckField(l.x, true, 8, 16, false, "relative mouse x");
+        CheckField(l.y, true, 24, 16, false, "relative mouse y");
+    }
 
     n = mouse::ApplicationUsages(kMouse16Desc, sizeof(kMouse16Desc), usages, 8);
     CHECK(n == 2 && usages[0] == 0x00010002u && usages[1] == 0x000C0001u, "16-bit mouse usages n=%zu", n);

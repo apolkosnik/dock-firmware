@@ -177,10 +177,29 @@ add_subdirectory(${BLUEPAD32_ROOT}/src/components/bluepad32 libbluepad32 SYSTEM)
 add_subdirectory(${PICO_PIO_USB_PATH} ${CMAKE_BINARY_DIR}/Pico-PIO-USB SYSTEM)
 add_subdirectory(${TUSB_XINPUT_PATH} xinput_host SYSTEM)
 
+# bluepad32's CMake links pico_cyw43_arch_none (the CYW43 driven from the
+# threadsafe-background async context). This firmware drives it under FreeRTOS
+# (pico_cyw43_arch_sys_freertos, above); with both, the two arch variants are
+# compiled in and cyw43_arch_init is defined twice. bluepad32 itself calls no
+# cyw43_arch function (only src/bluetooth/bluetooth.cpp does), so its choice is
+# replaced by this firmware's. (The upstream repository records a bluepad32
+# commit that is not published; the public ones all link pico_cyw43_arch_none.)
+foreach(_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+    get_target_property(_bluepad32_libs bluepad32 ${_prop})
+    if(_bluepad32_libs)
+        list(TRANSFORM _bluepad32_libs REPLACE "^pico_cyw43_arch_none$" "pico_cyw43_arch_sys_freertos")
+        set_target_properties(bluepad32 PROPERTIES ${_prop} "${_bluepad32_libs}")
+    endif()
+endforeach()
+# That arch's sources, compiled into bluepad32 too, need the kernel's headers.
+target_link_libraries(bluepad32 FreeRTOS-Kernel)
+
 # Needed for xinput_host
 add_library(tinyusb ALIAS tinyusb_host)
 
 target_compile_definitions(bluepad32 PUBLIC
+  # no lwIP in this firmware (pico_cyw43_arch_none used to define this)
+  CYW43_LWIP=0
   CYW43_WL_GPIO_COUNT=3
   CYW43_PIN_WL_DYNAMIC=0
   CYW43_DEFAULT_PIN_WL_REG_ON=21

@@ -29,6 +29,7 @@ constexpr uint8_t kMainEndCollection = 0xC;
 constexpr uint32_t kCollectionApplication = 0x01;
 constexpr uint32_t kInputConstant = 1u << 0;
 constexpr uint32_t kInputVariable = 1u << 1;
+constexpr uint32_t kInputRelative = 1u << 2;
 
 // Global item tags
 constexpr uint8_t kGlobalUsagePage = 0x0;
@@ -318,6 +319,7 @@ bool ParseReportDescriptor(const uint8_t* desc, size_t len, ReportLayout* out)
                 uint32_t size = g.report_size;
                 bool is_data = (item.udata & kInputConstant) == 0;
                 bool is_variable = (item.udata & kInputVariable) != 0;
+                bool is_relative = (item.udata & kInputRelative) != 0;
                 uint32_t base = bit_pos[g.report_id];
                 if (in_mouse && is_data && is_variable && !mouse_rid_known) {
                     mouse_rid_known = true;
@@ -337,7 +339,10 @@ bool ParseReportDescriptor(const uint8_t* desc, size_t len, ReportLayout* out)
                         bool is_signed = g.logical_min < 0;
                         if (page == kUsagePageButton && id >= 1 && id <= 5) {
                             SetField(&layout.buttons[id - 1], bit, size, false);
-                        } else if (page == kUsagePageGenericDesktop) {
+                        } else if (page == kUsagePageGenericDesktop && is_relative) {
+                            // A mouse's axes are movements (Input Relative). An
+                            // absolute pointing device's positions are not, and
+                            // it is not a mouse (its collection ends without X/Y).
                             if (id == kUsageX) {
                                 SetField(&layout.x, bit, size, is_signed);
                             } else if (id == kUsageY) {
