@@ -63,6 +63,13 @@ void usb_host_task(void*)
     pio_cfg.pin_dp = PIN_USB_DP;
     pio_cfg.pinout = PIO_USB_PINOUT_DPDM;
     tuh_configure(1, TUH_CFGID_RPI_PIO_USB_CONFIGURATION, &pio_cfg);
+    // Leave boot-capable HID interfaces (mice, keyboards) in report protocol:
+    // TinyUSB's default puts them into boot protocol, where a mouse reports
+    // its movement in 8 bits and clips anything beyond 127 counts per report,
+    // so fast movements lose distance. Mice are decoded from their report
+    // descriptor instead (MouseHidDriver; one without a usable descriptor is
+    // put back into boot protocol there).
+    tuh_hid_set_default_protocol(HID_PROTOCOL_REPORT);
     tuh_init(BOARD_TUH_RHPORT);
 
     while (1) {

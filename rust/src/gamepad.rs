@@ -69,6 +69,16 @@ pub struct Gamepad {
     pub wired: bool,
 }
 
+impl Gamepad {
+    /// Gamepad-connect flags. Bit 0, has_analog: a gamepad has sticks (a
+    /// pad without them reports them centred); a light gun's or a mouse's
+    /// lx/ly are its aim or movement, not sticks.
+    pub fn flags(&self) -> u32 {
+        let analog = self.kind != kind::LIGHT_GUN && self.kind != kind::MOUSE;
+        analog as u32
+    }
+}
+
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug)]
 pub struct GamepadData {

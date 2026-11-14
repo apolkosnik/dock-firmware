@@ -62,12 +62,15 @@ impl Handheld {
     }
 
     pub fn handle_gamepad_connected(&mut self, gamepad: &Gamepad) {
-        // 4 byte: slot
-        // 4 byte: reserved
+        // 4 byte: id
+        // 4 byte: flags (handheld firmware v1.1.0-beta4)
+        //   bit 0: has_analog (the handheld then reports an analog gamepad
+        //   to cores with extended input)
         // 8 byte: gamepad device ID
         // 32 byte: model name (\0 terminated)
         let mut buf = [0u8; 48];
         buf[0..4].copy_from_slice(&gamepad.id.0.to_le_bytes());
+        buf[4..8].copy_from_slice(&gamepad.flags().to_le_bytes());
         buf[8..16].copy_from_slice(&gamepad.device_id);
         // TODO gamepad model name
 

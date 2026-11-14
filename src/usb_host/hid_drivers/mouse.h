@@ -3,9 +3,11 @@
 #include "mouse/mouse.h"
 #include "usb_host/hid.h"
 
-/// USB HID mouse. Boot-protocol mice are read in the boot report format (TinyUSB
-/// puts boot interfaces into boot protocol during enumeration); other mice are
-/// decoded with the field layout taken from their report descriptor. Reports are
+/// USB HID mouse, decoded with the field layout taken from its report
+/// descriptor (boot interfaces are left in report protocol, InitUsbHost: the
+/// boot format clips movement to 127 counts per report). A boot mouse whose
+/// descriptor gives no usable layout is put into boot protocol and read in the
+/// boot report format. Reports are
 /// summed and sent to the handheld as GamepadData with the mouse marker set
 /// (see include/mouse/mouse.h for the contract).
 class MouseHidDriver : public UsbHidDriver {

@@ -19,13 +19,22 @@ void MouseHidDriver::Initialize(std::span<const uint8_t> descriptor) {
     uint8_t protocol_mode = tuh_hid_get_protocol(dev_addr, instance);
     bool have_layout = mouse::ParseReportDescriptor(descriptor.data(), descriptor.size(), &layout_);
 
-    if (itf_protocol == HID_ITF_PROTOCOL_MOUSE && protocol_mode == HID_PROTOCOL_BOOT) {
+    if (have_layout && protocol_mode != HID_PROTOCOL_BOOT) {
+        // Report protocol (the default, InitUsbHost): X and Y as wide as the
+        // mouse makes them (often 12 or 16 bits), nothing clipped.
+        boot_ = false;
+    } else if (itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
+        // A boot mouse without a usable report descriptor (or still in boot
+        // protocol): read the boot format, 8-bit movement.
         boot_ = true;
+        if (protocol_mode != HID_PROTOCOL_BOOT && !tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_BOOT)) {
+            log_warn("USB mouse: could not select boot protocol (dev_addr=%u instance=%u)", dev_addr, instance);
+        }
     } else if (have_layout) {
         boot_ = false;
     } else {
-        // A boot interface that refused SET_PROTOCOL and has no parseable
-        // descriptor: the boot layout is the best guess.
+        // No parseable descriptor and no boot interface: the boot layout is
+        // the best guess.
         boot_ = true;
         log_warn("USB mouse: no usable report descriptor, assuming boot report format (dev_addr=%u instance=%u)",
                  dev_addr, instance);
