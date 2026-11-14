@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "hid_drivers/generic.h"
+#include "hid_drivers/keyboard.h"
 #include "hid_drivers/mouse.h"
 #include "log/log.h"
 #include "mouse/mouse.h"
@@ -98,7 +99,11 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
     tuh_vid_pid_get(dev_addr, &vid, &pid);
     std::unique_ptr<UsbHidDriver> driver = nullptr;
 
-    if (tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_MOUSE || IsHidMouse(descriptor)) {
+    if (tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
+        // A boot keyboard interface (a keyboard's other interfaces, media
+        // keys and the like, are not gamepads and are left alone below).
+        driver = std::make_unique<KeyboardHidDriver>(*gamepad);
+    } else if (tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_MOUSE || IsHidMouse(descriptor)) {
         driver = std::make_unique<MouseHidDriver>(*gamepad);
     } else if (IsHidGamepad(descriptor)) {
         driver = std::make_unique<GenericHidDriver>(*gamepad);

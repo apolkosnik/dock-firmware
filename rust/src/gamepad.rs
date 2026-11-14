@@ -50,6 +50,12 @@ pub mod buttons {
     pub const MOUSE_FORWARD: u32 = 1 << 4;
     /// Set on every mouse report.
     pub const MOUSE: u32 = 1 << 30;
+
+    // Keyboard reports (USB HID keyboards: src/usb_host/hid_drivers/keyboard.cpp,
+    // include/keyboard/keyboard.h). Bits 0-7 are the modifier keys, lx/ly/lz the
+    // HID usages of the up to six keys held (two per axis), rx/ry/rz are 0.
+    /// Set on every keyboard report.
+    pub const KEYBOARD: u32 = 1 << 29;
 }
 
 /// Values of `Gamepad::kind` that are not bluepad32 `uni_controller_type_t` values.
@@ -59,6 +65,8 @@ pub mod kind {
     pub const LIGHT_GUN: u32 = 0x100;
     /// USB HID or Bluetooth mouse (include/mouse/mouse.h).
     pub const MOUSE: u32 = 0x101;
+    /// USB HID keyboard (include/keyboard/keyboard.h).
+    pub const KEYBOARD: u32 = 0x102;
 }
 
 #[derive(Debug)]
@@ -72,9 +80,9 @@ pub struct Gamepad {
 impl Gamepad {
     /// Gamepad-connect flags. Bit 0, has_analog: a gamepad has sticks (a
     /// pad without them reports them centred); a light gun's or a mouse's
-    /// lx/ly are its aim or movement, not sticks.
+    /// lx/ly are its aim or movement, a keyboard's its keys, not sticks.
     pub fn flags(&self) -> u32 {
-        let analog = self.kind != kind::LIGHT_GUN && self.kind != kind::MOUSE;
+        let analog = self.kind != kind::LIGHT_GUN && self.kind != kind::MOUSE && self.kind != kind::KEYBOARD;
         analog as u32
     }
 }
@@ -145,6 +153,11 @@ impl GamepadData {
     /// A mouse packet (buttons::MOUSE set).
     pub fn is_mouse(&self) -> bool {
         self.buttons & buttons::MOUSE != 0
+    }
+
+    /// A keyboard packet (buttons::KEYBOARD set).
+    pub fn is_keyboard(&self) -> bool {
+        self.buttons & buttons::KEYBOARD != 0
     }
 
     /// Combine a queued mouse packet (`self`) with a newer one from the same

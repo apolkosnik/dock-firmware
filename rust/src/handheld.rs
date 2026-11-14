@@ -238,7 +238,8 @@ impl PacketQueue {
 /// mouse packet is added into the queued packet of the same mouse when the
 /// buttons are unchanged, and queued behind it when they differ, so that every
 /// button transition reaches the handheld. A queued mouse packet is never
-/// replaced by a gamepad packet. The queue stays bounded: at most one
+/// replaced by a gamepad packet. Keyboard data packets (buttons::KEYBOARD) are
+/// each a key going down or up and are always queued. The queue stays bounded: at most one
 /// movement-only packet per mouse plus one per (human-rate) button change, and
 /// one trailing gamepad packet.
 fn push_back_locked(queue: &mut VecDeque<Packet>, packet: Packet) {
@@ -262,10 +263,19 @@ fn push_back_locked(queue: &mut VecDeque<Packet>, packet: Packet) {
             return;
         }
 
-        // If the last packet pushed is a (non-mouse) REQ_GAMEPAD_DATA packet, just replace it.
+        // A keyboard packet is the keys held after a key went down or up:
+        // every one is queued (a replaced packet would be a lost key), and
+        // none is replaced by a gamepad packet.
+        if data.is_keyboard() {
+            queue.push_back(packet);
+            return;
+        }
+
+        // If the last packet pushed is a (non-mouse, non-keyboard) REQ_GAMEPAD_DATA packet, just replace it.
         if let Some(back) = queue.back_mut()
             && let Some((_, back_data)) = back.get_gamepad_data()
             && !back_data.is_mouse()
+            && !back_data.is_keyboard()
         {
             *back = packet;
             log::warn!("Dropping gamepad data");
@@ -373,6 +383,31 @@ mod tests {
                 (REQ_GAMEPAD_DATA, Some((1, buttons::MOUSE, 11, 1, 0))),
                 (REQ_GAMEPAD_DATA, Some((3, buttons::B, 0, 0, 0))),
                 (REQ_GAMEPAD_DATA, Some((2, buttons::MOUSE, 1, 0, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn keyboard_packets_are_all_queued() {
+        let key = |id: u32, usage: i16| {
+            Packet::gamepad_data(GamepadId(id), &GamepadData::new(buttons::KEYBOARD, usage, 0, 0, 0, 0, 0))
+        };
+        let mut q = VecDeque::new();
+        // a key tapped while the link is busy: down and up both reach the handheld
+        push_back_locked(&mut q, key(5, 4));
+        push_back_locked(&mut q, key(5, 0));
+        // a gamepad packet does not replace a keyboard packet, nor the other way
+        push_back_locked(&mut q, gamepad(3, buttons::A));
+        push_back_locked(&mut q, key(5, 5));
+        push_back_locked(&mut q, gamepad(3, buttons::B));
+        assert_eq!(
+            contents(&q),
+            [
+                (REQ_GAMEPAD_DATA, Some((5, buttons::KEYBOARD, 4, 0, 0))),
+                (REQ_GAMEPAD_DATA, Some((5, buttons::KEYBOARD, 0, 0, 0))),
+                (REQ_GAMEPAD_DATA, Some((3, buttons::A, 0, 0, 0))),
+                (REQ_GAMEPAD_DATA, Some((5, buttons::KEYBOARD, 5, 0, 0))),
+                (REQ_GAMEPAD_DATA, Some((3, buttons::B, 0, 0, 0))),
             ]
         );
     }
